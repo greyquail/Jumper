@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sky Serpent</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: linear-gradient(180deg, #87CEEB, #E0F6FF);
+            font-family: 'Arial', sans-serif;
+            touch-action: manipulation;
+        }
+        canvas {
+            display: block;
+        }
+        #ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+        #gameOver {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            padding: 30px;
+            border-radius: 20px;
+            color: white;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">Score: <span id="score">0</span></div>
+    <div id="gameOver">
+        <h2>Flight Ended!</h2>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <button onclick="resetGame()">Fly Again</button>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let animationFrame;
+
+        // Configuration
+        const config = {
+            playerSize: 40,
+            cloudCount: 50,
+            obstacleCount: 30,
+            baseSpeed: 3,
+            boostMultiplier: 2.5,
+            particleCount: 500
+        };
+
+        // Game State
+        let gameState = {
+            score: 0,
+            isPlaying: false,
+            boost: 100,
+            particles: [],
+            clouds: [],
+            obstacles: [],
+            trails: []
+        };
+
+        // Player Object
+        const player = {
+            x: 0,
+            y: 0,
+            velY: 0,
+            isBoosting: false,
+            rotation: 0
+        };
+
+        // Initialize Game
+        function init() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.x = canvas.width * 0.2;
+            player.y = canvas.height / 2;
+
+            createEnvironment();
+            addEventListeners();
+            resetGame();
+        }
+
+        function createEnvironment() {
+            // Create clouds
+            for(let i = 0; i < config.cloudCount; i++) {
+                gameState.clouds.push(createCloud());
+            }
+
+            // Create obstacles
+            for(let i = 0; i < config.obstacleCount; i++) {
+                gameState.obstacles.push(createObstacle());
+            }
+        }
+
+        function createCloud() {
+            return {
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                scale: Math.random() * 0.5 + 0.5,
+                speed: Math.random() * 0.3 + 0.2,
+                alpha: Math.random() * 0.4 + 0.3
+            };
+        }
+
+        function createObstacle() {
+            return {
+                x: canvas.width + Math.random() * 1000,
+                y: Math.random() * canvas.height,
+                width: 60 + Math.random() * 40,
+                height: 60 + Math.random() * 40,
+                type: Math.random() > 0.5 ? 'storm' : 'bird',
+                rotation: 0
+            };
+        }
+
+        function addEventListeners() {
+            document.addEventListener('mousemove', (e) => {
+                if(gameState.isPlaying) {
+                    player.y = e.clientY;
+                }
+            });
+
+            document.addEventListener('touchmove', (e) => {
+                if(gameState.isPlaying) {
+                    player.y = e.touches[0].clientY;
+                }
+            }, { passive: true });
+
+            document.addEventListener('mousedown', startBoost);
+            document.addEventListener('touchstart', startBoost);
+            document.addEventListener('mouseup', endBoost);
+            document.addEventListener('touchend', endBoost);
+        }
+
+        function startBoost() {
+            player.isBoosting = true;
+        }
+
+        function endBoost() {
+            player.isBoosting = false;
+        }
+
+        function resetGame() {
+            gameState.score = 0;
+            gameState.isPlaying = true;
+            gameState.boost = 100;
+            gameState.obstacles.forEach(o => o.x = canvas.width + Math.random() * 1000);
+            document.getElementById('gameOver').style.display = 'none';
+            updateGame();
+        }
+
+        function updateGame() {
+            if(!gameState.isPlaying) return;
+
+            const speed = config.baseSpeed * (player.isBoosting && gameState.boost > 0 ? config.boostMultiplier : 1);
+            
+            // Update elements
+            updatePlayer(speed);
+            updateClouds(speed);
+            updateObstacles(speed);
+            updateParticles();
+            checkCollisions();
+            updateScore();
+
+            if(player.isBoosting) gameState.boost = Math.max(0, gameState.boost - 1.5);
+            else gameState.boost = Math.min(100, gameState.boost + 0.8);
+
+            drawFrame();
+            animationFrame = requestAnimationFrame(updateGame);
+        }
+
+        function updatePlayer() {
+            player.rotation = lerp(player.rotation, player.isBoosting ? -0.4 : 0, 0.1);
+        }
+
+        function updateClouds(speed) {
+            gameState.clouds.forEach(cloud => {
+                cloud.x -= speed * cloud.speed;
+                if(cloud.x < -100) {
+                    cloud.x = canvas.width + 100;
+                    cloud.y = Math.random() * canvas.height;
+                }
+            });
+        }
+
+        function updateObstacles(speed) {
+            gameState.obstacles.forEach(obstacle => {
+                obstacle.x -= speed * 2;
+                obstacle.rotation += 0.02;
+                if(obstacle.x < -100) {
+                    obstacle.x = canvas.width + Math.random() * 1000;
+                    obstacle.y = Math.random() * canvas.height;
+                }
+            });
+        }
+
+        function checkCollisions() {
+            gameState.obstacles.forEach(obstacle => {
+                const distance = Math.hypot(
+                    player.x - (obstacle.x + obstacle.width/2),
+                    player.y - (obstacle.y + obstacle.height/2)
+                );
+                
+                if(distance < config.playerSize/2 + Math.max(obstacle.width, obstacle.height)/2) {
+                    gameOver();
+                }
+            });
+        }
+
+        function gameOver() {
+            gameState.isPlaying = false;
+            document.getElementById('gameOver').style.display = 'block';
+            document.getElementById('finalScore').textContent = gameState.score;
+            cancelAnimationFrame(animationFrame);
+            createExplosion();
+        }
+
+        function createExplosion() {
+            for(let i = 0; i < 50; i++) {
+                gameState.particles.push({
+                    x: player.x,
+                    y: player.y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1,
+                    color: `hsl(${Math.random() * 360}, 100%, 50%)`
+                });
+            }
+        }
+
+        function updateParticles() {
+            gameState.particles = gameState.particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.1;
+                p.life -= 0.02;
+                return p.life > 0;
+            });
+        }
+
+        function drawFrame() {
+            // Background
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Clouds
+            gameState.clouds.forEach(cloud => {
+                ctx.save();
+                ctx.globalAlpha = cloud.alpha;
+                ctx.fillStyle = `rgba(255,255,255,${cloud.alpha})`;
+                drawCloud(cloud.x, cloud.y, cloud.scale);
+                ctx.restore();
+            });
+
+            // Obstacles
+            gameState.obstacles.forEach(obstacle => {
+                ctx.save();
+                ctx.translate(obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2);
+                ctx.rotate(obstacle.rotation);
+                ctx.fillStyle = obstacle.type === 'storm' ? '#2c3e50' : '#f1c40f';
+                ctx.fillRect(-obstacle.width/2, -obstacle.height/2, obstacle.width, obstacle.height);
+                ctx.restore();
+            });
+
+            // Player
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            ctx.rotate(player.rotation);
+            
+            // Body
+            ctx.fillStyle = '#e74c3c';
+            ctx.beginPath();
+            ctx.ellipse(0, 0, config.playerSize/2, config.playerSize/1.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Wings
+            ctx.fillStyle = '#e67e22';
+            ctx.beginPath();
+            ctx.ellipse(-config.playerSize/1.5, 0, config.playerSize/3, config.playerSize/2, -0.5, 0, Math.PI * 2);
+            ctx.ellipse(config.playerSize/1.5, 0, config.playerSize/3, config.playerSize/2, 0.5, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.restore();
+
+            // Particles
+            gameState.particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 5 * p.life, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Boost Meter
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fillRect(20, canvas.height - 60, 200, 20);
+            ctx.fillStyle = '#2ecc71';
+            ctx.fillRect(20, canvas.height - 60, 200 * (gameState.boost/100), 20);
+        }
+
+        function drawCloud(x, y, scale) {
+            ctx.beginPath();
+            ctx.arc(x, y, 40 * scale, 0, Math.PI * 2);
+            ctx.arc(x + 35 * scale, y - 15 * scale, 30 * scale, 0, Math.PI * 2);
+            ctx.arc(x + 60 * scale, y, 35 * scale, 0, Math.PI * 2);
+            ctx.arc(x - 30 * scale, y + 10 * scale, 25 * scale, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function updateScore() {
+            gameState.score += Math.round(config.baseSpeed);
+            document.getElementById('score').textContent = gameState.score;
+        }
+
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        // Start the game
+        init();
+        window.addEventListener('resize', init);
+    </script>
+</body>
+</html>
